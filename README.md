@@ -12,10 +12,10 @@ Enjoy,
 Autoscale will make the whole print fit inside of a 10cm envelope (or in math terms a 10cm cube).  Without Autoscale, you will have regulate your own heights (z) to fit your 3D printer, but the base (x and y) will still be less than or equal to 10cm.  
 
 Dependencies:
-    stl_tools
-    numpy
-    Image
-    Tkinter
-    TkFileDialog
-    math
-    sys
+-stl_tools
+-numpy
+-Image
+-Tkinter
+-TkFileDialog
+-math
+-sys
