@@ -1,3 +1,6 @@
+#original from https://github.com/thearn/stl_tools
+#this version has my edits to work better with the pro edition
+
 import struct
 import numpy as np
 from itertools import product
