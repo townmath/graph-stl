@@ -1,8 +1,12 @@
-from stl_tools import numpy2stl
-import Image
-import Tkinter
+# By: Jim Town
+# james.ross.town@gmail.com
+#
+
+from numpy2stl import numpy2stl
+from PIL import Image
+import tkinter as Tkinter #for compatibility
 from numpy import zeros,array
-from tkFileDialog import asksaveasfilename
+from tkinter.filedialog import asksaveasfilename
 import sys
 import math
 
@@ -10,8 +14,6 @@ BGCOLOR='#C0D9AF' #light green
 FGCOLOR='#E0EEE0' #slightly lighter green
 minScale=1  #if z values are a lot larger than x and y values, scale it
 maxDimension=100.0 #makes max dimension 100 = 10cm
-bottom=True #true prints a bottom
-minThickPct=.03 #percent of total height to put at bottom
 maxWidth=10000#140 #10000, #afinia website says it can print a 5.5" cube 140mm
 maxDepth=10000#140 #10000, #10000mm=10m user can shrink it with their printer software
 maxHeight=10000#140 #10000, #
@@ -80,6 +82,7 @@ class Application(Tkinter.Frame):
             self.scaleFactor=maxDimension/(heightArray.max()-heightArray.min())#max(graphWidth,graphHeight)/heightArray.max()
         else:
             self.scaleFactor=minScale
+        heightArray*=self.scaleFactor
         return heightArray
 
     def main(self):
@@ -100,14 +103,7 @@ class Application(Tkinter.Frame):
         if not heightArray.size:
             return
         else:
-            numpy2stl (heightArray, self.fileLocation,
-                       scale=self.scaleFactor, 
-                       #mask_val=1, 
-                       max_width=maxWidth,
-                       max_depth=maxDepth,
-                       max_height=maxHeight,
-                       min_thickness_percent=minThickPct, #helps reduce waste at bottom
-                       solid=bottom) #True means it will make a bottom
+            numpy2stl (heightArray, self.fileLocation) 
         self.outputBox.delete(1.0,Tkinter.END)
         self.outputBox.insert(Tkinter.END,'Program is finished.')
         #stop redirecting stdout:
@@ -224,12 +220,3 @@ root.geometry('605x'+str(winHeight)+'+10+10')
 app = Application(master=root)
 app.mainloop()
 
-
-#numpy2stl(heightArray, "filename.stl",
-#          scale=0.05, maximum height
-#          mask_val=5., not quite sure, seems to add holes
-#          max_width=235., #width of your 3-D printer surface in mm
-#          max_depth=140., #depth of your 3-D printer surface in mm
-#          max_height=150.,#height of your 3-D printer surface in mm
-#          min_thickness_percent = .005, helps reduce waste at bottom
-#          solid=True) True means it will make a bottom
