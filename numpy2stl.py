@@ -1,276 +1,223 @@
-# By: Jim Town
-# james.ross.town@gmail.com
-#
-
-from PIL import Image
-
-from numpy import zeros,array
+import struct
 import numpy as np
-import sys
-import math
-from stl import mesh
 from itertools import product
+##try:
+##    from .cwrapped import tessellate
+##    c_lib = True
+##except ImportError:
+##    c_lib = False
+c_lib=False
 
-#triangle points must be in counter clockwise order
-verbose=False
+ASCII_FACET = """  facet normal  {face[0]:e}  {face[1]:e}  {face[2]:e}
+    outer loop
+      vertex    {face[3]:e}  {face[4]:e}  {face[5]:e}
+      vertex    {face[6]:e}  {face[7]:e}  {face[8]:e}
+      vertex    {face[9]:e}  {face[10]:e}  {face[11]:e}
+    endloop
+  endfacet"""
+
+BINARY_HEADER = "80sI"
+BINARY_FACET = "12fH"
+
+def _add_sides_and_bottom(data):
+    volArr=np.ones((data.shape[0],data.shape[1],int(data.max())+1),dtype=np.float32)
+    #print(volArr.shape)
+    for i in range(data.shape[0]):
+        for j in range(data.shape[1]):
+            if data[i,j]>=mask_val:
+                kMax=int(scale*data[i,j])+1
+                #print(kMax)
+                for k in range(1,kMax):
+                    volArr[i,j,k]=0
+
+def _build_binary_stl(facets):
+    """returns a string of binary binary data for the stl file"""
+
+    lines = [struct.pack(BINARY_HEADER, b'Binary STL Writer', len(facets)), ]
+    for facet in facets:
+        facet = list(facet)
+        facet.append(0)  # need to pad the end with a unsigned short byte
+        lines.append(struct.pack(BINARY_FACET, *facet))
+    return lines
 
 
-def isIn(heights,pt):
-    i,j=pt
-    return i>=0 and j>=0 and i<heights.shape[0] and j<heights.shape[1]
+def _build_ascii_stl(facets):
+    """returns a list of ascii lines for the stl file """
 
-def getStartingPoint(heights,minVal):
-    for i in range(heights.shape[0]):
-        for j in range(heights.shape[1]):
-            #print(heights[i,j])
-            if heights[i,j]>minVal:
-                #print(i,j)
-                return (i,j)
-    print("no starting point?")
-    return None
+    lines = ['solid ffd_geom', ]
+    for facet in facets:
+        lines.append(ASCII_FACET.format(face=facet))
+    lines.append('endsolid ffd_geom')
+    return lines
 
-def isNeighbor(heights,pt1,pt2):
-    i,j=pt1
-    otherPts=[(i-1,j),(i,j+1),(i+1,j),(i,j-1),(i-1,j+1),(i+1,j+1),(i+1,j-1),(i-1,j-1)]
-    for pt in otherPts:
-        if pt==pt2:
-            return True
-    return False
 
-def hasAzero(heights,pt,minVal):
-    i,j=pt
-    otherPts=[(i-1,j),(i,j+1),(i+1,j),(i,j-1)]
-    for pt in otherPts:
-        pi,pj=pt
-        if ((isIn(heights,pt) and heights[pi,pj]<=minVal) or
-            not isIn(heights,pt)):
-            return True
-    return False
+def writeSTL(facets, file_name, ascii=False):
+    """writes an ASCII or binary STL file"""
 
-def getNextPt(heights,pt,oldPoints,minVal,clockwise=True):
-    #print(pt,lastPt)
-    i,j=pt
-    otherPts=[(i-1,j),(i,j+1),(i+1,j),(i,j-1)]
-    for newPt in otherPts:
-        ni,nj=newPt
-        if newPt in oldPoints or not isIn(heights,newPt) or heights[ni,nj]<=minVal:
-            continue
-        if hasAzero(heights,newPt,minVal):
-            return newPt
-                #NE       #SE       #SW       #NW
-    otherPts=[(i-1,j+1),(i+1,j+1),(i+1,j-1),(i-1,j-1)]
-    for newPt in otherPts:
-        ni,nj=newPt
-        if newPt in oldPoints or not isIn(heights,newPt) or heights[ni,nj]<=minVal:
-            continue
-        if hasAzero(heights,newPt,minVal):
-            return newPt
-    #debugging
-    #otherPts=[(i-1,j),(i,j+1),(i+1,j),(i,j-1),(i-1,j+1),(i+1,j+1),(i+1,j-1),(i-1,j-1)]
-    #print("no next point at:",pt,heights[pt])
-    #print("other points: ")
-    #for newPt in otherPts:
-    #    if isIn(heights,newPt):
-    #        print(newPt,heights[newPt],hasAzero(heights,newPt,minVal),newPt in oldPoints)
-    #    else:
-    #        print(newPt,"not in")
-    #print("")
-    #end debugging
-    return None
-    
-def getSides(heights,goodPts,minVal):
-    startPt=getStartingPoint(heights,minVal)
-    nextPt=getNextPt(heights,startPt,[],minVal)
-    sides=[startPt,nextPt]
-    backInTime=1
-    while True:#nextPt is not None: #nextPt!=startPt:#nextPt is not None:#not nextPt==startPt:
-        #print(nextPt)
-        nextPt=getNextPt(heights,nextPt,sides,minVal)
-        if nextPt is None:
-            backInTime+=1
-            nextPt=sides[-backInTime]
-            backInTime+=1
-            print(backInTime,nextPt)
-        else:
-            backInTime=1
-        sides.append(nextPt)
-        if isNeighbor(heights,startPt,nextPt):
-            break
-        
-    #if isNeighbor(heights,nextPt,startPt):
-    #    print("good")
-    #else:
-    #    print("bad",sides[-2],startPt)
-    return sides[:-1]#get rid of None at the end
-        
-                
-def getTriangles(heights,i,j,minVal,minThickness,verbose=False):
-    #0 = left triangle only
-    #1 = upper right #upper half of regular
-    #2 = opposite right only
-    #3 = lower right #lower half of regular
-
-    triangles=[]
-    otherPts={'N':(i-1,j),
-                 'S':(i+1,j),
-                 'E':(i,j+1),
-                 'W':(i,j-1),
-                 'NE':(i-1,j+1),
-                 'NW':(i-1,j-1),
-                 'SE':(i+1,j+1),
-                 'SW':(i+1,j-1)}
-    #check 0 left triangle
-    if (isIn(heights,otherPts['W'])  and heights[otherPts['W']]<=minVal and
-        isIn(heights,otherPts['SW']) and heights[otherPts['SW']]>minVal and
-        isIn(heights,otherPts['S'])  and heights[otherPts['S']]>minVal):
-        triTop=[[i,j,heights[i,j]],[i+1,j-1,heights[i+1,j-1]],[i+1,j,heights[i+1,j]]]
-        triBot=[[i,j,-minThickness],[i+1,j-1,-minThickness],[i+1,j,-minThickness]]
-        triangles.append(triTop)
-        triangles.append(triBot)
-        if verbose:
-            print(",,,,,0")
-            print(triTop)
-            #print(triBot)
-            print(",,,,,0")
-            
-        
-    #check 1 upper right 
-    if (isIn(heights,otherPts['E'])  and heights[otherPts['E']]>minVal and
-        isIn(heights,otherPts['SE']) and heights[otherPts['SE']]>minVal):
-        triTop=[[i,j,heights[i,j]],[i+1,j+1,heights[i+1,j+1]],[i,j+1,heights[i,j+1]]]
-        triBot=[[i,j,-minThickness],[i+1,j+1,-minThickness],[i,j+1,-minThickness]]
-        triangles.append(triTop)
-        triangles.append(triBot)
-        if verbose:
-            print("_____1")
-            print(triTop)
-            #print(triBot)
-            print("_____1")
-             
-    #check 2 opposite right
-    if (isIn(heights,otherPts['SE'])  and heights[otherPts['SE']]<=minVal and
-        isIn(heights,otherPts['S']) and heights[otherPts['S']]>minVal and
-        isIn(heights,otherPts['E'])  and heights[otherPts['E']]>minVal):
-        triTop=[[i,j,heights[i,j]],[i+1,j,heights[i+1,j]],[i,j+1,heights[i,j+1]]]
-        triBot=[[i,j,-minThickness],[i+1,j,-minThickness],[i,j+1,-minThickness]]
-        triangles.append(triTop)
-        triangles.append(triBot)
-        if verbose:
-            print(".....2")
-            print(triTop)
-            #print(triBot)
-            print(".....2")
-
-    #check 3 lower right 
-    if (isIn(heights,otherPts['S'])  and heights[otherPts['S']]>minVal and
-        isIn(heights,otherPts['SE']) and heights[otherPts['SE']]>minVal):
-        triTop=[[i,j,heights[i,j]],[i+1,j,heights[i+1,j]],[i+1,j+1,heights[i+1,j+1]]]
-        triBot=[[i,j,-minThickness],[i+1,j,-minThickness],[i+1,j+1,-minThickness]]
-        triangles.append(triTop)
-        triangles.append(triBot)
-        if verbose:
-            print("-----3")
-            print(triTop)
-            #print(triBot)
-            print("-----3")
-    if verbose: print(" ")
-    return triangles
-
-def numpy2stlIslands(heights,fileName="test.stl",minVal=0,minThickness=1):#trying to make islands
-    #print(len(np.where(heights>0)[0]))
-    #print(len(np.where(heights>0)[1]))
-    #print(heights.max())
-    goodPts=np.where(heights>minVal)
-    #print(minVal)
-    sidePts=getSides(heights,goodPts,minVal)
-    topTris=2*len(goodPts[0])
-    botTris=2*len(goodPts[0])
-    sideTris=2*len(sidePts)
-    shape=mesh.Mesh(np.zeros(topTris+sideTris+botTris, dtype=mesh.Mesh.dtype))
-    #print(len(goodPts[0]),len(sidePts))
-    #find an edge point
-    triCnt=0
-    for i in range(heights.shape[0]):
-        for j in range(heights.shape[1]):
-            if heights[i,j]>minVal:
-                triangles=getTriangles(heights,i,j,minVal,minThickness,verbose)
-                for triangle in triangles:
-                    #print(triangle,triCnt)
-                    shape.vectors[triCnt]=triangle
-                    triCnt+=1
-    for s,side in enumerate(sidePts):
-        if s==len(sidePts)-1:
-            nextS=sidePts[0]
-        else:
-            nextS=sidePts[s+1]
-        i,j=side
-        nextI,nextJ=nextS
-        tri1=[[i,j,-minThickness],[nextI,nextJ,heights[nextI,nextJ]],[i,j,heights[i,j]]]
-        tri2=[[i,j,-minThickness],[nextI,nextJ,-minThickness],[nextI,nextJ,heights[nextI,nextJ]]]
-        shape.vectors[triCnt]=tri1
-        shape.vectors[triCnt+1]=tri2
-        triCnt+=2
-    #print(triCnt)
-    shape.save(fileName)
-    
-
-def numpy2stlRectangles(heights,fileName="test.stl",minThickness=1):#rectangular (for now...)
-    topTris=2*heights.shape[0]*heights.shape[1]
-    lSideTris=2*heights.shape[0]
-    rSideTris=2*heights.shape[1]
-    bottomTris=2
-    shape = mesh.Mesh(np.zeros(topTris+lSideTris+rSideTris+bottomTris, dtype=mesh.Mesh.dtype))
-    triCnt=0
-    #top
-    for i in range(heights.shape[0]-1):
-        for j in range(heights.shape[1]-1):
-            tri1=[[i,j,heights[i,j]],[i+1,j,heights[i+1,j]],[i+1,j+1,heights[i+1,j+1]]]
-            tri2=[[i,j,heights[i,j]],[i+1,j+1,heights[i+1,j+1]],[i,j+1,heights[i,j+1]]]
-            shape.vectors[triCnt] = tri1
-            shape.vectors[triCnt+1] = tri2
-            triCnt+=2
-                          
-    #side1 j=0 and side3 j=shape[1]-1
-    for i in range(heights.shape[0]-1):
-        for j in [0,heights.shape[1]-1]:
-            tri1=[[i,j,-minThickness],[i,j,heights[i,j]],[i+1,j,heights[i+1,j]]]
-            tri2=[[i,j,-minThickness],[i+1,j,heights[i+1,j]],[i+1,j,-minThickness]]
-            shape.vectors[triCnt]=tri1
-            shape.vectors[triCnt+1]=tri2
-            triCnt+=2
-    #side2 i=0 and side4 i=shape[0]-1
-    for j in range(heights.shape[1]-1):
-        for i in [0,heights.shape[0]-1]:
-            tri1=[[i,j,-minThickness],[i,j,heights[i,j]],[i,j+1,heights[i,j+1]]]
-            tri2=[[i,j,-minThickness],[i,j+1,heights[i,j+1]],[i,j+1,-minThickness]]
-            shape.vectors[triCnt]=tri1
-            shape.vectors[triCnt+1]=tri2
-            triCnt+=2
-    #bottom
-    tri1=[[0,0,-minThickness],
-          [0,heights.shape[1]-1,-minThickness],
-          [heights.shape[0]-1,heights.shape[1]-1,-minThickness]]
-    tri2=[[0,0,-minThickness],
-          [heights.shape[0]-1,0,-minThickness],
-          [heights.shape[0]-1,heights.shape[1]-1,-minThickness]]
-    shape.vectors[triCnt]=tri1
-    shape.vectors[triCnt+1]=tri2
-    
-    shape.save(fileName)
-
-def numpy2stl(heights,
-              fileName="test.stl",
-              mask_val=0,
-              min_thickness=1,
-              isIsland=True, #cuts off bottom to make islands
-              ):
-    #heights*=scale
-    if isIsland:
-        numpy2stlIslands(heights,fileName,mask_val,min_thickness)
+    f = open(file_name, 'wb')
+    if ascii:
+        lines = _build_ascii_stl(facets)
+        lines_ = "\n".join(lines).encode("UTF-8")
+        f.write(lines_)
     else:
-        numpy2stlRectangles(heights,fileName,min_thickness)
+        data = _build_binary_stl(facets)
+        data = b"".join(data)
+        f.write(data)
+
+    f.close()
+    return f
+
+
+def roll2d(image, shifts):
+    return np.roll(np.roll(image, shifts[0], axis=0), shifts[1], axis=1)
+
+
+def numpy2stl(A, fn, scale=0.1, mask_val=None, ascii=False,#True,#
+              max_width=235.,
+              max_depth=140.,
+              max_height=150.,
+              solid=True,#False,
+              min_thickness=1,
+              force_python=False,#True,#
+              Amin=0):
+    """
+    Reads a numpy array, and outputs an STL file
+
+    Inputs:
+     A (ndarray) -  an 'm' by 'n' 2D numpy array
+     fn (string) -  filename to use for STL file
+
+    Optional input:
+     scale (float)  -  scales the height (surface) of the
+                       resulting STL mesh. Tune to match needs
+
+     mask_val (float) - any element of the inputted array that is less
+                        than this value will not be included in the mesh.
+                        default renders all vertices (x > -inf for all float x)
+
+     ascii (bool)  -  sets the STL format to ascii or binary (default)
+
+     max_width, max_depth, max_height (floats) - maximum size of the stl
+                                                object (in mm). Match this to
+                                                the dimensions of a 3D printer
+                                                platform
+     solid (bool): sets whether to create a solid geometry (with sides and
+                    a bottom) or not.
+     min_thickness (int) : when creating a solid bottom, this number sets the
+                             minimum thickness (in mm)
+     #min_thickness_percent (float) : when creating the solid bottom face, this
+                                    multiplier sets the minimum thickness in
+                                    the final geometry (shallowest interior
+                                    point to bottom face), as a percentage of
+                                    the thickness of the model computed up to
+                                    that point.
+    Returns: (None)
+    """
+
+    m, n = A.shape
+##    if n >= m:
+##        # rotate to best fit a printing platform
+##        A = np.rot90(A, k=3)
+##        m, n = n, m
+    A = scale*(A-Amin)#A = scale * (A - A.min())
+
+    if not mask_val:
+        mask_val = A.min() - 1.
+    #print 'testing'
+
+    if c_lib and not force_python:  # try to use c library
+        # needed for memoryviews
+        A = np.ascontiguousarray(A, dtype=float)
+
+        facets = np.asarray(tessellate(A, mask_val, min_thickness_percent,
+                            solid))
+        # center on platform
+        facets[:, 3::3] += -m / 2
+        facets[:, 4::3] += -n / 2
+
+    else:  # use python + numpy
+        facets = []
+        mask = np.zeros((m, n))
+        print("Creating top mesh...")
+        for i, k in product(range(m - 1), range(n - 1)):
+
+            this_pt = np.array([i - m / 2., k - n / 2., A[i, k]])
+            top_right = np.array([i - m / 2., k + 1 - n / 2., A[i, k + 1]])
+            bottom_left = np.array([i + 1. - m / 2., k - n / 2., A[i + 1, k]])
+            bottom_right = np.array(
+                [i + 1. - m / 2., k + 1 - n / 2., A[i + 1, k + 1]])
+
+            n1, n2 = np.zeros(3), np.zeros(3)
+
+            if (this_pt[-1] > mask_val and top_right[-1] > mask_val and
+                    bottom_left[-1] > mask_val):
+
+                facet = np.concatenate([n1, top_right, this_pt, bottom_right])
+                mask[i, k] = 1
+                mask[i, k + 1] = 1
+                mask[i + 1, k] = 1
+                facets.append(facet)
+
+            if (this_pt[-1] > mask_val and bottom_right[-1] > mask_val and
+                    bottom_left[-1] > mask_val):
+
+                facet = np.concatenate(
+                    [n2, bottom_right, this_pt, bottom_left])
+                facets.append(facet)
+                mask[i, k] = 1
+                mask[i + 1, k + 1] = 1
+                mask[i + 1, k] = 1
+        facets = np.array(facets)
+
+        if solid:
+            print("Computed edges...")
+            edge_mask = np.sum([roll2d(mask, (i, k))
+                               for i, k in product([-1, 0, 1], repeat=2)],
+                               axis=0)
+            edge_mask[np.where(edge_mask == 9.)] = 0.
+            edge_mask[np.where(edge_mask != 0.)] = 1.
+            edge_mask[0::m - 1, :] = 1.
+            edge_mask[:, 0::n - 1] = 1.
+            X, Y = np.where(edge_mask == 1.)
+            locs = list(zip(X - m / 2., Y - n / 2.))
+            #print(len(locs))
+            zvals = facets[:, 5::3]
+            zmin, zthickness = zvals.min(), zvals.ptp()
+
+            minval = -min_thickness# sets minimum thickness #zmin - min_thickness_percent * zthickness
+
+            bottom = []
+            print("Extending edges, creating bottom...")
+            #print(facets.shape,minval)
+            for i, facet in enumerate(facets):
+                if (facet[3], facet[4]) in locs:
+                    facets[i][5] = minval
+                if (facet[6], facet[7]) in locs:
+                    facets[i][8] = minval
+                if (facet[9], facet[10]) in locs:
+                    facets[i][11] = minval
+                this_bottom = np.concatenate(
+                    [facet[:3], facet[6:8], [minval], facet[3:5], [minval],
+                     facet[9:11], [minval]])
+                bottom.append(this_bottom)
+
+            facets = np.concatenate([facets, bottom])
+            #print(facets.shape)
+
+    xsize = facets[:, 3::3].ptp()
+    if xsize > max_width:
+        facets = facets * float(max_width) / xsize
+
+    ysize = facets[:, 4::3].ptp()
+    if ysize > max_depth:
+        facets = facets * float(max_depth) / ysize
+
+    zsize = facets[:, 5::3].ptp()
+    if zsize > max_height:
+        facets = facets * float(max_height) / zsize
+    print ('Writing .stl file...')
+    return writeSTL(facets, fn, ascii=ascii)
 
 if __name__=="__main__":
-    imageArr=np.load("test.npy")
-    numpy2stl(imageArr,mask_val=-.1,min_thickness=5)
-        
+    from graphSTL import threeDgraph
+    threeDgraph('x**2+y**2')
