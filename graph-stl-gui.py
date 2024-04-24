@@ -1,5 +1,6 @@
 #from stl_tools
 import numpy2stl # my own numpy2stl edits
+from graphSTL import makeHeights, checkFunction
 from PIL import Image
 import tkinter as Tkinter #for compatibility
 from numpy import zeros,array
@@ -11,13 +12,13 @@ import math
 BGCOLOR='#C0D9AF' #light green 
 FGCOLOR='#E0EEE0' #slightly lighter green
 minScale=1  #if z values are a lot larger than x and y values, scale it
-maxDimension=100.0 #makes max dimension 100 = 10cm
+maxDimension=200.0 #makes max dimension 100 = 10cm
 bottom=True #true prints a bottom
 minThickPct=.03 #percent of total height to put at bottom
-maxWidth=10000#140 #10000, #afinia website says it can print a 5.5" cube 140mm
-maxDepth=10000#140 #10000, #10000mm=10m user can shrink it with their printer software
-maxHeight=10000#140 #10000, #
-maskVal=0#.1#might need to print donuts?
+maxWidth=100#140 #10000, #afinia website says it can print a 5.5" cube 140mm
+maxDepth=100#140 #10000, #10000mm=10m user can shrink it with their printer software
+maxHeight=100#140 #10000, #
+maskVal=.1#might need to print donuts?
 
 class Application(Tkinter.Frame):
 
@@ -33,18 +34,10 @@ class Application(Tkinter.Frame):
                 self.outputBox.insert(Tkinter.END,str+' ')#,False)
                 root.update()
     def checkFunction(self):
-        x=float(self.xmax.get()+self.xmin.get())/float(2)
-        y=float(self.ymax.get()+self.ymin.get())/float(2)
-        try:
-            testing=eval(self.function.get())
-        except ZeroDivisionError:
-            self.output=self.function.get()+' is not defined at ('+str(x)+','+str(y)+'), try a different domain.'
-            return False
-        except:
-            self.output=self.function.get()+' is not a valid function, try again (see examples below).'
-            return False
-        else:
-            return True
+        isGood,self.output=checkFunction(self.xmax.get(),self.xmin.get(),
+                                         self.ymax.get(),self.ymin.get(),
+                                         self.function.get())
+        return isGood
 
     def saveFileLocation(self):
         self.fileLocation=asksaveasfilename(initialdir=".",filetypes=[("STL","*.stl")])
@@ -58,32 +51,8 @@ class Application(Tkinter.Frame):
             return False
         
     def makeHeights (self):
-        xmin=self.xmin.get()
-        xmax=self.xmax.get()
-        ymin=self.ymin.get()
-        ymax=self.ymax.get()
-        graphWidth=xmax-xmin
-        graphHeight=ymax-ymin
-        countBy=float(max(graphWidth,graphHeight))/maxDimension
-        arrayWidth=int(graphWidth/countBy)+1
-        arrayHeight=int(graphHeight/countBy)+1
-        heightArray=zeros((arrayWidth,arrayHeight))
-        for i in range(arrayWidth):
-            for j in range(arrayHeight):
-                x=i*countBy+xmin
-                y=-j*countBy+ymax
-                try:
-                    heightArray[i][j]=eval(self.function.get())
-                except:
-                    self.outputBox.delete(1.0,Tkinter.END)
-                    self.output=self.function.get()+' is not defined at ('+str(x)+','+str(y)+'), try a different domain.'
-                    self.outputBox.insert(Tkinter.END,self.output)
-                    return array([])
-        if self.autoScale.get():
-            self.scaleFactor=maxDimension/(heightArray.max()-heightArray.min())#max(graphWidth,graphHeight)/heightArray.max()
-        else:
-            self.scaleFactor=minScale
-        return heightArray
+        return makeHeights(self.xmin.get(),self.xmax.get(),self.ymin.get(),self.ymax.get(),self.function.get(),
+                           self.autoScale.get(),maxDimension)
 
     def main(self):
         self.outputBox.delete(1.0,Tkinter.END)
@@ -98,7 +67,7 @@ class Application(Tkinter.Frame):
         root.update()
         #start redirecting stdout:
         sys.stdout = self.StdoutRedirector(self.outputBox)
-        heightArray=self.makeHeights()
+        heightArray,self.scaleFactor=self.makeHeights()
         # make stl file
         if not heightArray.size:
             return
@@ -193,14 +162,18 @@ class Application(Tkinter.Frame):
         self.column=1
         self.row=3
         #self.insertImage('logo',row=0,column=0,rowspan=10)
-        self.xmax=self.makeSlider("x max", 10, from_=-1000, to=1000, length=225, bg=BGCOLOR, resolution=1, orient=Tkinter.HORIZONTAL)
-        self.ymax =self.makeSlider("y max", 10, from_=-1000, to=1000, length=225, bg=BGCOLOR, resolution=1, orient=Tkinter.HORIZONTAL)
+        self.xmax=self.makeSlider("x max", 10, from_=-1000, to=1000, length=225, bg=BGCOLOR,
+                                  resolution=1, orient=Tkinter.HORIZONTAL)
+        self.ymax =self.makeSlider("y max", 10, from_=-1000, to=1000, length=225, bg=BGCOLOR,
+                                   resolution=1, orient=Tkinter.HORIZONTAL)
         self.startButton=self.makeButton(text="Start", width=10,command=self.main)
         self.makeCheckBox()
         self.column=1
         self.row+=2
-        self.xmin=self.makeSlider("x min", -10, from_=-1000, to=1000, length=225, bg=BGCOLOR, resolution=1, orient=Tkinter.HORIZONTAL)
-        self.ymin =self.makeSlider("y min", -10, from_=-1000, to=1000, length=225, bg=BGCOLOR, resolution=1, orient=Tkinter.HORIZONTAL)
+        self.xmin=self.makeSlider("x min", -10, from_=-1000, to=1000, length=225, bg=BGCOLOR,
+                                  resolution=1, orient=Tkinter.HORIZONTAL)
+        self.ymin =self.makeSlider("y min", -10, from_=-1000, to=1000, length=225, bg=BGCOLOR,
+                                   resolution=1, orient=Tkinter.HORIZONTAL)
         self.row+=2
         self.column=0
         self.function = self.functionInput("z=",bg=FGCOLOR,width=300)

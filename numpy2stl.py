@@ -1,12 +1,12 @@
 import struct
 import numpy as np
 from itertools import product
-##try:
-##    from .cwrapped import tessellate
-##    c_lib = True
-##except ImportError:
-##    c_lib = False
-c_lib=False
+try:
+    from .cwrapped import tessellate
+    c_lib = True
+except ImportError:
+    c_lib = False
+#c_lib=False
 
 ASCII_FACET = """  facet normal  {face[0]:e}  {face[1]:e}  {face[2]:e}
     outer loop
@@ -76,6 +76,7 @@ def numpy2stl(A, fn, scale=0.1, mask_val=None, ascii=False,#True,#
               max_width=235.,
               max_depth=140.,
               max_height=150.,
+              min_thickness_percent=0,
               solid=True,#False,
               min_thickness=1,
               force_python=False,#True,#
